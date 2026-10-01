@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      # Свой экземпляр банка на каждый прогон: у публичного стенда общая база на всех.
+      parabank:
+        image: parasoft/parabank@sha256:747453a0c00b52ed36c7c55aa842a6e9e4a761f70ad577ec07b1f6cbee77e0e5
+        ports:
+          - 8090:8080
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Зависимости
+        run: uv sync --group dev
+
+      - name: Линтер и типы
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+
+      - name: Браузер
+        run: uv run playwright install --with-deps chromium
+
+      # Фикстура _stand_is_up сама дождётся, пока Tomcat в контейнере начнёт отвечать.
+      # Последовательно: одновременную запись ParaBank теряет (PB-013).
+      - name: Тесты
+        run: uv run pytest
+
+      - name: Allure-отчёт
+        if: always()
+        run: npx --yes allure-commandline@2 generate allure-results --clean -o allure-report
+
+      - name: Артефакты
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: |
+            allure-report/
+            test-results/
